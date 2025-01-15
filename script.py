@@ -1,14 +1,27 @@
-import socket
 import os
 import time
-import json
+import socket
+from flask import Flask, jsonify
 from cachetools import TTLCache
+from mcstatus import MinecraftServer
+
+app = Flask(__name__)
 
 MOTD_CACHE_DURATION = int(os.getenv("MOTD_CACHE_DURATION", 60))
 MOTD_SERVER_HOST = os.getenv("MOTD_SERVER_HOST", "172.17.0.1")
 MOTD_SERVER_PORT = int(os.getenv("MOTD_SERVER_PORT", 25589))
 
 cache = TTLCache(maxsize=1, ttl=MOTD_CACHE_DURATION)
+server_status = "up"
+
+def check_server_status():
+    global server_status
+    try:
+        server = MinecraftServer(MOTD_SERVER_HOST, MOTD_SERVER_PORT)
+        server.status()
+        server_status = "up"
+    except Exception:
+        server_status = "down"
 
 def get_motd():
     if 'motd' in cache:
@@ -23,15 +36,19 @@ def get_motd():
             motd = parse_motd(response)
             cache['motd'] = motd
             return motd
-    except Exception as e:
-        return "Error retrieving MOTD"
+    except Exception:
+        return "Minecraft server is down"
 
 def parse_motd(response):
-    motd = response[3:].decode('utf-8', errors='ignore')
-    return motd.split('\x00')[0]
+    return response[3:].decode('utf-8', errors='ignore').split('\x00')[0]
+
+@app.route("/motd", methods=["GET"])
+def motd():
+    check_server_status()
+    return jsonify({"motd": get_motd(), "status": server_status})
+
+def main():
+    app.run(host=MOTD_SERVER_HOST, port=MOTD_SERVER_PORT)
 
 if __name__ == "__main__":
-    while True:
-        motd = get_motd()
-        print(f"Current MOTD: {motd}")
-        time.sleep(MOTD_CACHE_DURATION)
+    main()
